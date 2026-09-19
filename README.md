@@ -1,0 +1,1 @@
+# hackathon-max-smartcity_gruz67
