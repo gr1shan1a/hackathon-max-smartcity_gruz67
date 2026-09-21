@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json.bak
+
+# Production build outputs
+dist/
+*/dist/
+build/
+*/build/
+dist-ssr/
+out/
+
+# Environment and Secrets (CRITICAL for hackathon rules)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!*.env.example
+*.pem
+*.key
+*.cert
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# TypeScript & Linter Caches
+*.tsbuildinfo
+.eslintcache
+.cache/
+.tmp/
+.temp/
+
+# IDE and Editor Files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.sublime-workspace
+*.sublime-project
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Local runtime and database
+.local/
+
+*.pdf
+make_logo.html
+

@@ -1,0 +1,413 @@
+openapi: 3.1.0
+info:
+  title: MAX Smart City API (MAX Дом)
+  description: REST API цифровой платформы управления многоквартирным домом в мессенджере MAX
+  version: 1.0.0
+  contact:
+    name: Команда «Груз 67»
+servers:
+  - url: http://localhost:3001/api
+    description: Локальный сервер разработки
+  - url: http://localhost/api
+    description: Docker Nginx Reverse Proxy
+
+paths:
+  /health:
+    get:
+      summary: Проверка статуса сервиса
+      responses:
+        '200':
+          description: Сервис работает штатно
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: MAX Smart City API
+                  version:
+                    type: string
+                    example: 1.0.0
+
+  /profile:
+    get:
+      summary: Получение профиля текущего жителя
+      responses:
+        '200':
+          description: Профиль жильца
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+
+  /complex:
+    get:
+      summary: Информация о жилом комплексе и управляющей компании
+      responses:
+        '200':
+          description: Данные МКД
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplexInfo'
+
+  /outages:
+    get:
+      summary: Список актуальных аварий и плановых отключений
+      responses:
+        '200':
+          description: Аварии и отключения
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Outage'
+
+  /tickets:
+    get:
+      summary: Список обращений и заявок по дому
+      responses:
+        '200':
+          description: Заявки
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Ticket'
+    post:
+      summary: Создание новой заявки в управляющую компанию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description]
+              properties:
+                title:
+                  type: string
+                  example: Застрял пассажирский лифт
+                description:
+                  type: string
+                  example: Подъезд 2, этаж 3.
+                category:
+                  type: string
+                  enum: [elevator, plumbing, electric, cleaning, intercom, parking, other]
+                isPublic:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          description: Заявка успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+
+  /tickets/{id}/vote:
+    post:
+      summary: Подтверждение (upvote) или опровержение (downvote) заявки
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [up, down]
+      responses:
+        '200':
+          description: Голос учтен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+
+  /bills:
+    get:
+      summary: Список квитанций и начислений ЖКУ
+      responses:
+        '200':
+          description: Квитанции
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bill'
+
+  /bills/{id}/pay:
+    post:
+      summary: Оплата квитанции за ЖКУ
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Квитанция оплачена
+
+  /meters:
+    get:
+      summary: Показания индивидуальных приборов учета
+      responses:
+        '200':
+          description: Список счетчиков
+    post:
+      summary: Передача текущих показаний счетчиков
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meterId, value]
+              properties:
+                meterId:
+                  type: string
+                value:
+                  type: number
+      responses:
+        '200':
+          description: Показания приняты
+
+  /parking:
+    get:
+      summary: Информация о зарегистрированном месте на крытой парковке
+      responses:
+        '200':
+          description: Данные машиноместа и пропуска
+
+  /parking/passes:
+    post:
+      summary: Выпуск разового гостевого пропуска на закрытый паркинг
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [guestCarNumber]
+              properties:
+                guestCarNumber:
+                  type: string
+                  example: О777ОО 77
+                guestName:
+                  type: string
+                validHours:
+                  type: number
+                  default: 8
+      responses:
+        '201':
+          description: Пропуск выпущен
+
+  /parking/report-car:
+    post:
+      summary: Репорт на неправильно припаркованное авто с push-уведомлением владельцу
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [carNumber]
+              properties:
+                carNumber:
+                  type: string
+                  example: А987ВС 199
+                issueType:
+                  type: string
+                  example: blocked_exit
+                location:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Владелец оповещен через бота MAX
+
+  /meetings:
+    get:
+      summary: Список общедомовых собраний (ОСС) и голосований
+      responses:
+        '200':
+          description: Собрания
+
+  /meetings/{id}/vote-slot:
+    post:
+      summary: Голосование за удобный тайм-слот собрания
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slotId]
+              properties:
+                slotId:
+                  type: string
+      responses:
+        '200':
+          description: Голос за слот принят
+
+  /meetings/{id}/calendar.ics:
+    get:
+      summary: Экспорт собрания в формате iCalendar (.ics)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Файл календаря .ics
+          content:
+            text/calendar:
+              schema:
+                type: string
+
+  /neighbors/message:
+    post:
+      summary: Приватное сообщение соседу в квартиру через бота MAX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toApartment, text]
+              properties:
+                toApartment:
+                  type: integer
+                  example: 48
+                topic:
+                  type: string
+                  example: Протечка
+                text:
+                  type: string
+                  example: Проверьте кран в ванной
+      responses:
+        '201':
+          description: Сообщение доставлено в MAX адресата
+
+  /directory:
+    get:
+      summary: Телефонный справочник, контакты участкового и график вывоза мусора
+      responses:
+        '200':
+          description: Контакты и графики
+
+  /bot/webhook:
+    post:
+      summary: Обработка команд чат-бота MAX (/start, /tickets, /bills, /report)
+      responses:
+        '200':
+          description: Ответ бота
+
+components:
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        apartment:
+          type: integer
+        entrance:
+          type: integer
+        floor:
+          type: integer
+        accountNumber:
+          type: string
+        parkingSpot:
+          type: string
+
+    ComplexInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        managementCompany:
+          type: string
+        apartmentsCount:
+          type: integer
+
+    Outage:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        period:
+          type: string
+        affected:
+          type: string
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        category:
+          type: string
+        apartment:
+          type: integer
+        upvotes:
+          type: integer
+        downvotes:
+          type: integer
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: string
+        period:
+          type: string
+        totalAmount:
+          type: number
+        status:
+          type: string
+        dueDate:
+          type: string

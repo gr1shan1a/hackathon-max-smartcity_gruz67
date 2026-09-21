@@ -1,0 +1,38 @@
+# ============================================================
+# MAX Smart City — Зависимости проекта / Requirements
+# ============================================================
+# Этот файл описывает все необходимые инструменты и зависимости.
+# Конкретные версии пакетов npm зафиксированы в package-lock.json.
+# ============================================================
+
+# ── Системные требования ──────────────────────────────────
+# Node.js >= 20.x (LTS)         https://nodejs.org
+# npm   >= 10.x                 (поставляется с Node.js)
+# Docker >= 24.x (опционально)  https://www.docker.com/get-started
+
+# ── Backend (backend/package.json) ────────────────────────
+# express ^4.21
+# cors    ^2.8
+# dotenv  ^16.4
+# tsx     ^4.19   (dev — TypeScript runner, без компиляции)
+# typescript ^5.6 (dev)
+# @types/express @types/cors @types/node (dev)
+
+# ── Frontend (frontend/package.json) ──────────────────────
+# react ^18.3
+# react-dom ^18.3
+# lucide-react ^0.460
+# sonner ^1.7          (toast-уведомления)
+# clsx + tailwind-merge
+# canvas-confetti ^1.9
+# @tailwindcss/vite ^4 (плагин Tailwind v4 для Vite)
+# vite ^6              (dev-сервер и сборщик)
+# typescript ^5.6      (dev)
+# @vitejs/plugin-react ^4.3 (dev)
+
+# ── Docker Compose (опционально) ─────────────────────────
+# compose.yaml запускает frontend (port 5173) и backend (port 3001)
+# в двух отдельных контейнерах. Требуется Docker Desktop.
+
+# ── Инструкция по установке ──────────────────────────────
+# Смотрите файл QUICKSTART.md в корне репозитория.
