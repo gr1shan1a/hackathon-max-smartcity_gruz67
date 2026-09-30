@@ -66,4 +66,9 @@ Desktop.ini
 
 *.pdf
 make_logo.html
+.kilo
+.dist
 
+GAMMA_PROMPT_RU.md
+GAMMA_PROMPT_RU.txt
+outputs/

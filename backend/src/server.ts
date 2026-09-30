@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { config } from './config';
-import { route, pool, migrate, seed, newId } from './db/store';
+import { route, pool, migrate, seed, newId, isManager, matchesUserScope } from './db/store';
 import path from 'node:path';
 import { displayPass, parkingStatus } from './parking';
 import { randomBytes } from 'node:crypto';
@@ -14,8 +14,6 @@ app.disable('x-powered-by');
 app.use(cors({ origin: false }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
-
-
 
 // 1. Health check & basic info
 app.get('/api/health', async (_req, res) => {
@@ -33,14 +31,117 @@ app.get('/api/profile', route((req, res, db) => {
   res.json(db.userProfile);
 }));
 
+app.put('/api/profile', route((req, res, db) => {
+  const { phone, email, registeredCars, notifications, privacy, name, apartment, personalAccount, role } = req.body;
+
+  // Verified immutable fields protection
+  if (name !== undefined && name !== db.userProfile.name) {
+    return res.status(400).json({ error: 'ФИО подтверждено паспортом и защищено от изменения' });
+  }
+  if (apartment !== undefined && apartment !== db.userProfile.apartment) {
+    return res.status(400).json({ error: 'Номер квартиры подтверждён реестром собственников' });
+  }
+  if (personalAccount !== undefined && personalAccount !== db.userProfile.personalAccount) {
+    return res.status(400).json({ error: 'Лицевой счёт формируется управляющей компанией' });
+  }
+  if (role !== undefined && role !== db.userProfile.role) {
+    return res.status(400).json({ error: 'Роль пользователя не может быть изменена самостоятельно' });
+  }
+
+  // Editable settings
+  if (phone !== undefined) {
+    if (typeof phone !== 'string' || !/^\+?[0-9\s\-()]{6,25}$/.test(phone.trim())) {
+      return res.status(400).json({ error: 'Укажите корректный номер телефона' });
+    }
+    db.userProfile.phone = phone.trim();
+  }
+  if (email !== undefined) {
+    if (typeof email !== 'string' || (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) {
+      return res.status(400).json({ error: 'Укажите корректный адрес e-mail' });
+    }
+    db.userProfile.email = email.trim();
+  }
+  if (registeredCars !== undefined) {
+    if (!Array.isArray(registeredCars)) {
+      return res.status(400).json({ error: 'registeredCars должен быть списком номеров' });
+    }
+    db.userProfile.registeredCars = registeredCars.map(c => String(c).trim().toUpperCase()).filter(Boolean);
+  }
+  if (notifications !== undefined && typeof notifications === 'object') {
+    db.userProfile.notifications = {
+      ...(db.userProfile.notifications || {}),
+      ...notifications,
+    };
+  }
+  if (privacy !== undefined && typeof privacy === 'object') {
+    db.userProfile.privacy = {
+      ...(db.userProfile.privacy || {}),
+      ...privacy,
+    };
+  }
+
+  res.json(db.userProfile);
+}));
+
 // 2. Outages and Emergency Alerts
 app.get('/api/outages', route((req, res, db) => {
-  res.json(db.outages);
+  const filtered = (db.outages || []).filter((o: any) => matchesUserScope(db.userProfile, o.scopeType, o.scopeId));
+  res.json(filtered);
+}));
+
+app.post('/api/outages', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const { title, service, status, startDate, endDate, description, scopeType, scopeId } = req.body;
+  if (!title || !service) {
+    return res.status(400).json({ error: 'Укажите тему и вид коммунальной услуги' });
+  }
+
+  const outage = {
+    id: newId('OUT'),
+    title,
+    service,
+    status: status || 'planned',
+    startDate: startDate || 'В ближайшее время',
+    endDate: endDate || 'Уточняется',
+    description: description || '',
+    scopeType: scopeType || 'complex',
+    scopeId: scopeId || 'all',
+  };
+
+  db.outages = db.outages || [];
+  db.outages.unshift(outage);
+  res.status(201).json(outage);
+}));
+
+app.put('/api/outages/:id', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const outage = (db.outages || []).find((o: any) => o.id === req.params.id);
+  if (!outage) return res.status(404).json({ error: 'Авария/отключение не найдено' });
+
+  const { title, service, status, startDate, endDate, description, scopeType, scopeId } = req.body;
+  if (title) outage.title = title;
+  if (service) outage.service = service;
+  if (status) outage.status = status;
+  if (startDate) outage.startDate = startDate;
+  if (endDate) outage.endDate = endDate;
+  if (description !== undefined) outage.description = description;
+  if (scopeType) outage.scopeType = scopeType;
+  if (scopeId) outage.scopeId = scopeId;
+
+  res.json(outage);
+}));
+
+app.delete('/api/outages/:id', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const idx = (db.outages || []).findIndex((o: any) => o.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Авария/отключение не найдено' });
+  db.outages.splice(idx, 1);
+  res.json({ success: true, message: 'Отключение удалено' });
 }));
 
 // 3. Tickets (ЖКХ Заявки)
 app.get('/api/tickets', route((req, res, db) => {
-  res.json(db.tickets.filter((t: any) => t.isPublic || t.apartment === db.userProfile.apartment || db.userProfile.role === 'admin'));
+  res.json((db.tickets || []).filter((t: any) => t.isPublic || t.apartment === db.userProfile.apartment || isManager(db.userProfile)));
 }));
 
 app.post('/api/tickets', route((req, res, db) => {
@@ -70,17 +171,82 @@ app.post('/api/tickets', route((req, res, db) => {
   res.status(201).json(newTicket);
 }));
 
+app.put('/api/tickets/:id', route((req, res, db) => {
+  const { id } = req.params;
+  const ticket = (db.tickets || []).find((t: any) => t.id === id);
+  if (!ticket) return res.status(404).json({ error: 'Заявка не найдена' });
+
+  if (ticket.apartment !== db.userProfile.apartment) {
+    return res.status(403).json({ error: 'Можно редактировать только свои заявки' });
+  }
+
+  if (ticket.status !== 'new') {
+    return res.status(400).json({ error: 'Редактировать заявку можно только в статусе "Новая"' });
+  }
+
+  const { title, description, category, isPublic } = req.body;
+  if (title) ticket.title = title;
+  if (description) ticket.description = description;
+  if (category) ticket.category = category;
+  if (isPublic !== undefined) ticket.isPublic = isPublic;
+  ticket.updatedAt = 'Только что';
+  res.json(ticket);
+}));
+
+app.post('/api/tickets/:id/cancel', route((req, res, db) => {
+  const { id } = req.params;
+  const ticket = (db.tickets || []).find((t: any) => t.id === id);
+  if (!ticket) return res.status(404).json({ error: 'Заявка не найдена' });
+
+  if (ticket.apartment !== db.userProfile.apartment) {
+    return res.status(403).json({ error: 'Можно отменять только свои заявки' });
+  }
+
+  if (ticket.status !== 'new') {
+    return res.status(400).json({ error: 'Отменить можно только новую заявку до взятия в работу' });
+  }
+
+  ticket.status = 'cancelled';
+  ticket.updatedAt = 'Только что';
+  res.json(ticket);
+}));
+
+app.post('/api/tickets/:id/status', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const id = String(req.params.id);
+  const { status, masterName, masterComment, assignedTo } = req.body;
+  const ticket = (db.tickets || []).find((t: any) => t.id === id);
+  if (!ticket) return res.status(404).json({ error: 'Заявка не найдена' });
+
+  const validStatuses = ['new', 'assigned', 'in_progress', 'completed', 'rejected', 'cancelled'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Некорректный статус заявки' });
+  }
+
+  ticket.status = status;
+  if (masterName !== undefined) {
+    ticket.masterName = masterName;
+    ticket.assignedTo = { name: masterName, role: 'Мастер УК', phone: '+7 (495) 123-45-67' };
+  }
+  if (assignedTo !== undefined) ticket.assignedTo = assignedTo;
+  if (masterComment !== undefined) ticket.masterComment = masterComment;
+  ticket.updatedAt = 'Только что';
+  res.json(ticket);
+}));
+
 app.post('/api/tickets/:id/vote', route((req, res, db) => {
   const { id } = req.params;
   const { type } = req.body;
   if (!['up', 'down'].includes(type)) return res.status(400).json({ error: 'Некорректный голос' });
 
-  const ticket = db.tickets.find((t: any) => t.id === id);
+  const ticket = (db.tickets || []).find((t: any) => t.id === id);
   if (!ticket) {
     return res.status(404).json({ error: 'Заявка не найдена' });
   }
 
-  if (!ticket.isPublic && ticket.apartment !== db.userProfile.apartment && db.userProfile.role !== 'admin') return res.status(403).json({ error: 'Заявка недоступна' });
+  if (!ticket.isPublic && ticket.apartment !== db.userProfile.apartment && !isManager(db.userProfile)) {
+    return res.status(403).json({ error: 'Заявка недоступна' });
+  }
   if (ticket.userVoted === type) {
     // Toggle off
     if (type === 'up') ticket.upvotes = Math.max(0, ticket.upvotes - 1);
@@ -106,9 +272,13 @@ app.get('/api/bills', route((req, res, db) => {
 
 app.post('/api/bills/:id/pay', route((req, res, db) => {
   const { id } = req.params;
-  const bill = db.bills.find((b: any) => b.id === id);
+  const bill = (db.bills || []).find((b: any) => b.id === id);
   if (!bill) {
     return res.status(404).json({ error: 'Счет не найден' });
+  }
+
+  if (bill.status === 'paid') {
+    return res.status(400).json({ error: 'Квитанция уже оплачена' });
   }
 
   bill.status = 'paid';
@@ -127,14 +297,29 @@ app.get('/api/meters', route((req, res, db) => {
 
 app.post('/api/meters', route((req, res, db) => {
   const { meterId, value } = req.body;
-  const meter = db.meterReadings.find((m: any) => m.id === meterId);
+  const meter = (db.meterReadings || []).find((m: any) => m.id === meterId);
   if (!meter) {
     return res.status(404).json({ error: 'Счетчик не найден' });
   }
 
-  if (!Number.isFinite(Number(value)) || Number(value) < meter.previousValue) return res.status(400).json({ error: 'Показание должно быть числом не меньше предыдущего' });
-  meter.currentValue = Number(value);
+  const numVal = Number(value);
+  if (!Number.isFinite(numVal) || numVal < meter.previousValue) {
+    return res.status(400).json({ error: 'Показание должно быть числом не меньше предыдущего' });
+  }
+
+  meter.history = meter.history || [];
+  const nowMonth = new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const formattedMonth = nowMonth.charAt(0).toUpperCase() + nowMonth.slice(1);
+  meter.history.unshift({
+    date: formattedMonth,
+    value: numVal,
+    consumption: Math.round((numVal - meter.previousValue) * 100) / 100,
+  });
+
+  meter.previousValue = meter.currentValue;
+  meter.currentValue = numVal;
   meter.status = 'submitted';
+  meter.lastSubmissionDate = 'Только что';
   res.json({
     success: true,
     message: `Показания счетчика ${meter.name} сохранены`,
@@ -219,9 +404,13 @@ app.post('/api/meetings/:id/vote-slot', route((req, res, db) => {
   const { id } = req.params;
   const { slotId } = req.body;
 
-  const meeting = db.meetings.find((m: any) => m.id === id);
+  const meeting = (db.meetings || []).find((m: any) => m.id === id);
   if (!meeting) {
     return res.status(404).json({ error: 'Собрание не найдено' });
+  }
+
+  if (meeting.status === 'past' || meeting.status === 'completed') {
+    return res.status(400).json({ error: 'Голосование по этому собранию уже завершено' });
   }
 
   if (!meeting.timeSlots.some((s: any) => s.id === slotId)) return res.status(400).json({ error: 'Время не найдено' });
@@ -238,6 +427,41 @@ app.post('/api/meetings/:id/vote-slot', route((req, res, db) => {
   }
 
   res.json(meeting);
+}));
+
+app.post('/api/meetings', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const { title, type, date, timeSlots, description, format, quorum } = req.body;
+  if (!title || !date) {
+    return res.status(400).json({ error: 'Укажите тему и дату собрания' });
+  }
+
+  const slots = Array.isArray(timeSlots) && timeSlots.length > 0
+    ? timeSlots.map((ts: any, idx: number) => ({
+        id: `slot-${idx + 1}`,
+        datetime: typeof ts === 'string' ? ts : (ts.datetime || '19:00'),
+        votes: 0,
+      }))
+    : [
+        { id: 'slot-1', datetime: `${date} 19:00`, votes: 0 },
+        { id: 'slot-2', datetime: `${date} 20:00`, votes: 0 },
+      ];
+
+  const newMeeting = {
+    id: newId('MTG'),
+    title,
+    type: type || 'oss',
+    status: 'voting',
+    date,
+    format: format || 'Очно-заочное (в приложении)',
+    quorum: quorum || '50% + 1 голос',
+    timeSlots: slots,
+    description: description || '',
+  };
+
+  db.meetings = db.meetings || [];
+  db.meetings.unshift(newMeeting);
+  res.status(201).json(newMeeting);
 }));
 
 // .ics Calendar generation
@@ -392,9 +616,9 @@ app.post('/api/marketplace', route((req, res, db) => {
 // Edit marketplace item (only owner)
 app.put('/api/marketplace/:id', route((req, res, db) => {
   const { id } = req.params;
-  const { title, category, price, description } = req.body;
+  const { title, category, price, description, status } = req.body;
 
-  const item = db.marketplace.find((m: any) => m.id === id);
+  const item = (db.marketplace || []).find((m: any) => m.id === id);
   if (!item) {
     return res.status(404).json({ error: 'Объявление не найдено' });
   }
@@ -406,6 +630,7 @@ app.put('/api/marketplace/:id', route((req, res, db) => {
   if (title) item.title = title;
   if (category) item.category = category;
   if (description !== undefined) item.description = description;
+  if (status && ['active', 'sold'].includes(status)) item.status = status;
   if (price !== undefined) {
     const numPrice = Number(price);
     item.price = numPrice;
@@ -418,7 +643,7 @@ app.put('/api/marketplace/:id', route((req, res, db) => {
 // Delete marketplace item (only owner)
 app.delete('/api/marketplace/:id', route((req, res, db) => {
   const { id } = req.params;
-  const idx = db.marketplace.findIndex((m: any) => m.id === id);
+  const idx = (db.marketplace || []).findIndex((m: any) => m.id === id);
   if (idx === -1) {
     return res.status(404).json({ error: 'Объявление не найдено' });
   }
@@ -444,6 +669,184 @@ app.post('/api/users/switch', route((req, res, db) => {
     return res.status(404).json({ error: 'Пользователь не найден' });
   }
   res.json({ success: true, profile: user });
+}));
+
+// 12. Polls (Опросы)
+app.get('/api/polls', route((req, res, db) => {
+  const polls = (db.polls || [])
+    .filter((p: any) => matchesUserScope(db.userProfile, p.scopeType, p.scopeId))
+    .map((p: any) => {
+      const copy = { ...p };
+      const userVotes = db.pollVotes?.[p.id] || [];
+      copy.userVotedOptionIds = userVotes;
+      copy.totalVotes = (p.options || []).reduce((sum: number, o: any) => sum + (o.votes || 0), 0);
+      return copy;
+    });
+  res.json(polls);
+}));
+
+app.post('/api/polls', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const { title, description, scopeType, scopeId, allowMultiple, anonymous, showResultsBeforeEnd, startsAt, endsAt, options } = req.body;
+  if (!title || !Array.isArray(options) || options.filter((o: any) => String(o).trim()).length < 2) {
+    return res.status(400).json({ error: 'Укажите тему опроса и минимум 2 варианта ответа' });
+  }
+
+  const pollOptions = options
+    .map((o: any) => String(o).trim())
+    .filter(Boolean)
+    .map((optText: string, idx: number) => ({
+      id: `opt-${idx + 1}`,
+      text: optText,
+      votes: 0,
+    }));
+
+  const newPoll = {
+    id: newId('POL'),
+    authorId: db.userProfile.id,
+    authorName: db.userProfile.name,
+    title,
+    description: description || '',
+    scopeType: scopeType || 'complex',
+    scopeId: scopeId || 'all',
+    allowMultiple: Boolean(allowMultiple),
+    anonymous: anonymous ?? true,
+    showResultsBeforeEnd: showResultsBeforeEnd ?? true,
+    startsAt: startsAt || 'С момента публикации',
+    endsAt: endsAt || 'До отмены',
+    status: 'active',
+    createdAt: 'Только что',
+    options: pollOptions,
+    totalVotes: 0,
+  };
+
+  db.polls = db.polls || [];
+  db.polls.unshift(newPoll);
+  res.status(201).json(newPoll);
+}));
+
+app.post('/api/polls/:id/vote', route((req, res, db) => {
+  const id = String(req.params.id);
+  const rawIds = req.body.optionIds || (req.body.optionId ? [req.body.optionId] : []);
+  const optionIds = Array.isArray(rawIds) ? rawIds : [rawIds];
+
+  const poll = (db.polls || []).find((p: any) => p.id === id);
+  if (!poll) return res.status(404).json({ error: 'Опрос не найден' });
+
+  if (!matchesUserScope(db.userProfile, poll.scopeType, poll.scopeId)) {
+    return res.status(403).json({ error: 'Опрос недоступен для вашего адреса' });
+  }
+
+  if (poll.status !== 'active') {
+    return res.status(400).json({ error: 'Опрос завершён или не активен' });
+  }
+
+  db.pollVotes = db.pollVotes || {};
+  if (db.pollVotes[id] && db.pollVotes[id].length > 0) {
+    return res.status(409).json({ error: 'Вы уже приняли участие в этом опросе' });
+  }
+
+  if (optionIds.length === 0) {
+    return res.status(400).json({ error: 'Выберите хотя бы один вариант ответа' });
+  }
+
+  if (!poll.allowMultiple && optionIds.length > 1) {
+    return res.status(400).json({ error: 'В этом опросе разрешено выбрать только один вариант' });
+  }
+
+  for (const optId of optionIds) {
+    const opt = poll.options.find((o: any) => o.id === optId);
+    if (!opt) return res.status(400).json({ error: `Вариант ответа ${optId} не существует` });
+  }
+
+  for (const optId of optionIds) {
+    const opt = poll.options.find((o: any) => o.id === optId);
+    if (opt) opt.votes = (opt.votes || 0) + 1;
+  }
+
+  poll.totalVotes = poll.options.reduce((sum: number, o: any) => sum + (o.votes || 0), 0);
+  db.pollVotes[id] = optionIds;
+
+  const result = {
+    ...poll,
+    userVotedOptionIds: optionIds,
+  };
+  res.json(result);
+}));
+
+app.post('/api/polls/:id/close', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const poll = (db.polls || []).find((p: any) => p.id === req.params.id);
+  if (!poll) return res.status(404).json({ error: 'Опрос не найден' });
+  poll.status = 'closed';
+  res.json(poll);
+}));
+
+app.delete('/api/polls/:id', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const idx = (db.polls || []).findIndex((p: any) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Опрос не найден' });
+  db.polls.splice(idx, 1);
+  res.json({ success: true, message: 'Опрос удалён' });
+}));
+
+// 13. Official Announcements (Официальные объявления)
+app.get('/api/announcements', route((req, res, db) => {
+  const list = (db.announcements || []).filter((a: any) => matchesUserScope(db.userProfile, a.scopeType, a.scopeId));
+  res.json(list);
+}));
+
+app.post('/api/announcements', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const { title, text, category, scopeType, scopeId, validUntil, isOfficial, urgent } = req.body;
+  if (!title || !text) {
+    return res.status(400).json({ error: 'Укажите заголовок и текст объявления' });
+  }
+
+  const newAnn = {
+    id: newId('ANN'),
+    title,
+    text,
+    category: category || 'info',
+    scopeType: scopeType || 'complex',
+    scopeId: scopeId || 'all',
+    validUntil: validUntil || 'Бессрочно',
+    isOfficial: isOfficial ?? true,
+    urgent: Boolean(urgent),
+    authorName: db.userProfile.name,
+    authorRole: db.userProfile.role === 'admin' ? 'Председатель ТСЖ' : 'Управляющий',
+    createdAt: 'Только что',
+  };
+
+  db.announcements = db.announcements || [];
+  db.announcements.unshift(newAnn);
+  res.status(201).json(newAnn);
+}));
+
+app.put('/api/announcements/:id', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const ann = (db.announcements || []).find((a: any) => a.id === req.params.id);
+  if (!ann) return res.status(404).json({ error: 'Объявление не найдено' });
+
+  const { title, text, category, scopeType, scopeId, validUntil, urgent, isOfficial } = req.body;
+  if (title) ann.title = title;
+  if (text) ann.text = text;
+  if (category) ann.category = category;
+  if (scopeType) ann.scopeType = scopeType;
+  if (scopeId) ann.scopeId = scopeId;
+  if (validUntil !== undefined) ann.validUntil = validUntil;
+  if (urgent !== undefined) ann.urgent = urgent;
+  if (isOfficial !== undefined) ann.isOfficial = isOfficial;
+
+  res.json(ann);
+}));
+
+app.delete('/api/announcements/:id', route((req, res, db) => {
+  if (!isManager(db.userProfile)) return res.status(403).json({ error: 'Требуются права управляющего' });
+  const idx = (db.announcements || []).findIndex((a: any) => a.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Объявление не найдено' });
+  db.announcements.splice(idx, 1);
+  res.json({ success: true, message: 'Объявление удалено' });
 }));
 
 // MAX sends authenticated events here; replies are delivered by the durable worker.

@@ -13,6 +13,8 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  Archive,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarketplaceItem, UserProfile } from '../types';
@@ -31,10 +33,11 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   onItemsUpdated,
   onOpenNeighborMsgWithApt,
 }) => {
-  const [filter, setFilter] = useState<'all' | 'goods' | 'services' | 'free'>('all');
+  const [filter, setFilter] = useState<'all' | 'my' | 'goods' | 'services' | 'free'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MarketplaceItem | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [togglingStatusId, setTogglingStatusId] = useState<string | null>(null);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -44,6 +47,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredItems = items.filter((item) => {
+    if (filter === 'my') return item.apartment === profile.apartment;
     if (filter === 'goods') return item.category === 'goods';
     if (filter === 'services') return item.category === 'services';
     if (filter === 'free') return item.category === 'free';
@@ -66,6 +70,26 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
     setPrice(item.price > 0 ? String(item.price) : '');
     setDescription(item.description);
     setIsModalOpen(true);
+  };
+
+  const handleToggleSoldStatus = async (item: MarketplaceItem) => {
+    const nextStatus = item.status === 'sold' ? 'active' : 'sold';
+    setTogglingStatusId(item.id);
+    try {
+      const updated = await api.updateMarketplaceItem(item.id, {
+        status: nextStatus,
+      });
+      onItemsUpdated(items.map((i) => (i.id === item.id ? updated : i)));
+      toast.success(
+        nextStatus === 'sold'
+          ? 'Объявление отмечено как проданное'
+          : 'Объявление снова активно'
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Не удалось обновить статус');
+    } finally {
+      setTogglingStatusId(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,7 +151,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-white tracking-tight">Объявления соседей</h2>
-          <p className="text-xs text-slate-400">Вещи, услуги и помощь рядом</p>
+          <p className="text-xs text-slate-400">Вещи, услуги и соседская помощь</p>
         </div>
         <button
           onClick={openCreateModal}
@@ -142,6 +166,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       <div className="flex flex-wrap items-center gap-2 pb-1">
         {[
           { id: 'all', label: 'Все' },
+          { id: 'my', label: `Мои (${items.filter((i) => i.apartment === profile.apartment).length})` },
           { id: 'goods', label: 'Вещи' },
           { id: 'services', label: 'Услуги' },
           { id: 'free', label: 'Даром' },
@@ -164,27 +189,50 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {filteredItems.map((item) => {
           const isOwner = item.apartment === profile.apartment;
+          const isSold = item.status === 'sold';
+
           return (
             <div
               key={item.id}
-              className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-all flex flex-col justify-between space-y-3"
+              className={`p-4 rounded-2xl bg-white/[0.03] border transition-all flex flex-col justify-between space-y-3 ${
+                isSold
+                  ? 'border-white/5 opacity-75 bg-black/20'
+                  : 'border-white/10 hover:border-white/20'
+              }`}
             >
               <div className="space-y-2">
                 <div className="flex items-start justify-between gap-2">
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                      item.category === 'free'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        : item.category === 'services'
-                        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-                        : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                    }`}
-                  >
-                    {item.category === 'free' ? 'Даром' : item.category === 'services' ? 'Услуга' : 'Товар'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        item.category === 'free'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                          : item.category === 'services'
+                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                          : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                      }`}
+                    >
+                      {item.category === 'free' ? 'Даром' : item.category === 'services' ? 'Услуга' : 'Товар'}
+                    </span>
+                    {isSold && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-500/30">
+                        Продано
+                      </span>
+                    )}
+                  </div>
+
                   <div className="flex items-center gap-1">
                     {isOwner && (
                       <>
+                        <button
+                          onClick={() => handleToggleSoldStatus(item)}
+                          disabled={togglingStatusId === item.id}
+                          className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
+                          title={isSold ? 'Вернуть в продажу' : 'Отметить проданным'}
+                        >
+                          <Archive className="w-3 h-3 text-amber-400" />
+                          <span>{isSold ? 'Вернуть' : 'Продано'}</span>
+                        </button>
                         <button
                           onClick={() => openEditModal(item)}
                           className="p-1 rounded-lg bg-white/5 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-300 transition-colors cursor-pointer"
@@ -201,12 +249,14 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                         </button>
                       </>
                     )}
-                    <span className="text-[11px] text-slate-500">{item.createdAt}</span>
+                    <span className="text-[11px] text-slate-500 ml-1">{item.createdAt}</span>
                   </div>
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-semibold text-white leading-snug">{item.title}</h3>
+                  <h3 className={`text-sm font-semibold text-white leading-snug ${isSold ? 'line-through text-slate-400' : ''}`}>
+                    {item.title}
+                  </h3>
                   <p className="text-xs text-slate-300 leading-relaxed mt-1">{item.description}</p>
                 </div>
 
@@ -243,7 +293,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                     )}
                   </span>
 
-                  {!isOwner && (
+                  {!isOwner && !isSold && (
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => onOpenNeighborMsgWithApt(item.apartment)}

@@ -7,6 +7,8 @@ export interface Outage {
   affected: string;
   description: string;
   updatedAt: string;
+  scopeType?: 'entrance' | 'building' | 'complex';
+  scopeId?: string;
 }
 
 export interface Ticket {
@@ -28,6 +30,8 @@ export interface Ticket {
     phone: string;
   };
   completionPhoto?: string;
+  masterComment?: string;
+  updatedAt?: string;
 }
 
 export interface Bill {
@@ -46,6 +50,13 @@ export interface Bill {
   }[];
 }
 
+export interface MeterHistoryEntry {
+  id: string;
+  date: string;
+  value: number;
+  diff: number;
+}
+
 export interface MeterReading {
   id: string;
   type: 'cold_water' | 'hot_water' | 'electricity_t1' | 'electricity_t2';
@@ -56,6 +67,51 @@ export interface MeterReading {
   unit: string;
   lastVerified: string;
   status: 'submitted' | 'due' | 'pending';
+  history?: MeterHistoryEntry[];
+}
+
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: number;
+}
+
+export interface Poll {
+  id: string;
+  authorId: string;
+  authorName: string;
+  title: string;
+  description: string;
+  scopeType: 'entrance' | 'building' | 'complex';
+  scopeId: string;
+  pollType: 'single' | 'multiple';
+  options: PollOption[];
+  allowMultiple: boolean;
+  anonymous: boolean;
+  showResultsBeforeEnd: boolean;
+  startsAt: string;
+  endsAt: string;
+  status: 'draft' | 'scheduled' | 'active' | 'closed' | 'archived';
+  createdAt: string;
+  updatedAt?: string;
+  userVotedOptionIds?: string[];
+  hasVoted?: boolean;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  category: 'water' | 'elevator' | 'meeting' | 'cleaning' | 'parking' | 'emergency' | 'general';
+  scopeType: 'entrance' | 'building' | 'complex';
+  scopeId: string;
+  authorName: string;
+  publishedAt: string;
+  validUntil?: string;
+  isOfficial: boolean;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ParkingPass {
@@ -142,10 +198,37 @@ export interface MarketplaceItem {
   createdAt: string;
   description: string;
   image?: string;
+  status?: 'active' | 'sold';
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  apartment: number;
+  entrance: number;
+  floor: number;
+  accountNumber: string;
+  registeredCars: string[];
+  parkingSpot: string;
+  hasCoveredParking: boolean;
+  role: 'resident' | 'admin';
+  building: number;
+  notifications: {
+    outages: boolean;
+    tickets: boolean;
+    neighbors: boolean;
+    parking: boolean;
+  };
+  privacy: {
+    showApartmentToNeighbors: boolean;
+    allowDirectMessages: boolean;
+  };
 }
 
 // Mock Users Registry
-export const mockUsers = [
+export const mockUsers: UserProfile[] = [
   {
     id: 'usr-47',
     name: 'Ким Дмитрий Алексеевич',
@@ -158,7 +241,18 @@ export const mockUsers = [
     registeredCars: ['Е777КХ 777', 'М123АВ 799'],
     parkingSpot: 'P-47 (Подземный паркинг, уровень -1)',
     hasCoveredParking: true,
-    role: 'resident' as const,
+    role: 'resident',
+    building: 2,
+    notifications: {
+      outages: true,
+      tickets: true,
+      neighbors: true,
+      parking: true,
+    },
+    privacy: {
+      showApartmentToNeighbors: true,
+      allowDirectMessages: true,
+    },
   },
   {
     id: 'usr-01',
@@ -172,7 +266,18 @@ export const mockUsers = [
     registeredCars: ['А001МС 777'],
     parkingSpot: 'P-01 (Подземный паркинг, уровень -1)',
     hasCoveredParking: true,
-    role: 'admin' as const,
+    role: 'admin',
+    building: 2,
+    notifications: {
+      outages: true,
+      tickets: true,
+      neighbors: true,
+      parking: true,
+    },
+    privacy: {
+      showApartmentToNeighbors: true,
+      allowDirectMessages: true,
+    },
   },
 ];
 
@@ -311,6 +416,11 @@ export const initialData = {
       unit: 'м³',
       lastVerified: '2028-04-15',
       status: 'submitted',
+      history: [
+        { id: 'mh-1', date: '22 июля 2026', value: 138.80, diff: 3.50 },
+        { id: 'mh-2', date: '21 августа 2026', value: 142.45, diff: 3.65 },
+        { id: 'mh-3', date: '22 сентября 2026', value: 146.10, diff: 3.65 },
+      ],
     },
     {
       id: 'mtr-2',
@@ -322,6 +432,11 @@ export const initialData = {
       unit: 'м³',
       lastVerified: '2027-11-20',
       status: 'submitted',
+      history: [
+        { id: 'mh-4', date: '22 июля 2026', value: 85.10, diff: 2.90 },
+        { id: 'mh-5', date: '21 августа 2026', value: 88.20, diff: 3.10 },
+        { id: 'mh-6', date: '22 сентября 2026', value: 91.50, diff: 3.30 },
+      ],
     },
     {
       id: 'mtr-3',
@@ -333,6 +448,11 @@ export const initialData = {
       unit: 'кВт·ч',
       lastVerified: '2030-01-10',
       status: 'submitted',
+      history: [
+        { id: 'mh-7', date: '21 июля 2026', value: 1195.00, diff: 45.00 },
+        { id: 'mh-8', date: '21 августа 2026', value: 1240.00, diff: 45.00 },
+        { id: 'mh-9', date: '22 сентября 2026', value: 1285.00, diff: 45.00 },
+      ],
     },
     {
       id: 'mtr-4',
@@ -344,6 +464,11 @@ export const initialData = {
       unit: 'кВт·ч',
       lastVerified: '2030-01-10',
       status: 'submitted',
+      history: [
+        { id: 'mh-10', date: '21 июля 2026', value: 435.00, diff: 15.00 },
+        { id: 'mh-11', date: '21 августа 2026', value: 450.00, diff: 15.00 },
+        { id: 'mh-12', date: '22 сентября 2026', value: 465.00, diff: 15.00 },
+      ],
     },
   ] as MeterReading[],
   parkingPasses: [
@@ -524,4 +649,117 @@ export const initialData = {
     sentAt: string;
     status: 'sent' | 'delivered';
   }[],
+  announcements: [
+    {
+      id: 'ANN-01',
+      title: 'График сезонной промывки фасадного остекления',
+      content: 'Уважаемые жители ЖК «Северное Сияние»! С 28 сентября по 2 октября специализированная клининговая служба будет проводить мойку внешнего остекления. Просим плотно закрыть окна и убрать предметы с наружных подоконников.',
+      category: 'cleaning',
+      scopeType: 'complex',
+      scopeId: 'all',
+      authorName: 'Светлова М. И. (Совет МКД)',
+      publishedAt: '24 сентября 2026',
+      validUntil: '2026-10-02T18:00:00Z',
+      isOfficial: true,
+      status: 'active',
+      createdAt: '2026-09-24T10:00:00Z',
+    },
+    {
+      id: 'ANN-02',
+      title: 'Плановое техническое обслуживание лифта во 2 подъезде',
+      content: 'В пятницу 26 сентября с 10:00 до 12:00 будет временно остановлен пассажирский лифт 2 подъезда для смазки направляющих и регулировки троса. Грузопассажирский лифт продолжит работу в штатном режиме.',
+      category: 'elevator',
+      scopeType: 'entrance',
+      scopeId: '2',
+      authorName: 'Светлова М. И. (Совет МКД)',
+      publishedAt: 'Вчера в 16:30',
+      validUntil: '2026-09-26T12:00:00Z',
+      isOfficial: true,
+      status: 'active',
+      createdAt: '2026-09-25T16:30:00Z',
+    },
+    {
+      id: 'ANN-03',
+      title: 'Проверка пожарных гидрантов в 1 подъезде',
+      content: 'Уважаемые жильцы 1 подъезда! 27 сентября с 11:00 будет производиться плановый осмотр шкафов пожарных кранов на этажах с 1 по 8.',
+      category: 'emergency',
+      scopeType: 'entrance',
+      scopeId: '1',
+      authorName: 'Светлова М. И. (Совет МКД)',
+      publishedAt: 'Сегодня в 09:15',
+      validUntil: '2026-09-27T14:00:00Z',
+      isOfficial: true,
+      status: 'active',
+      createdAt: '2026-09-26T09:15:00Z',
+    },
+  ] as Announcement[],
+  polls: [
+    {
+      id: 'POL-01',
+      authorId: 'usr-01',
+      authorName: 'Светлова Марина Ивановна',
+      title: 'Озеленение внутренней территории двора весной',
+      description: 'Совет МКД предлагает выбрать приоритет для закупки саженцев и обустройства клумб на 2027 год.',
+      scopeType: 'complex',
+      scopeId: 'all',
+      pollType: 'single',
+      options: [
+        { id: 'opt-1', text: 'Посадка хвойных кустарников и туй вдоль забора', votes: 34 },
+        { id: 'opt-2', text: 'Многолетние цветущие клумбы и розарий', votes: 52 },
+        { id: 'opt-3', text: 'Дополнительные тенистые клены у детской площадки', votes: 28 },
+      ],
+      allowMultiple: false,
+      anonymous: false,
+      showResultsBeforeEnd: true,
+      startsAt: '2026-09-20T00:00:00Z',
+      endsAt: '2026-10-15T23:59:59Z',
+      status: 'active',
+      createdAt: '2026-09-20T10:00:00Z',
+    },
+    {
+      id: 'POL-02',
+      authorId: 'usr-01',
+      authorName: 'Светлова Марина Ивановна',
+      title: 'Установка полки для буккроссинга во 2 подъезде',
+      description: 'Предлагаем установить аккуратную книжную полку в холле 1 этажа рядом с консьержем 2 подъезда для обмена книгами.',
+      scopeType: 'entrance',
+      scopeId: '2',
+      pollType: 'single',
+      options: [
+        { id: 'opt-21', text: 'Да, отличная идея, буду участвовать', votes: 14 },
+        { id: 'opt-22', text: 'Нет, будет захламлять холл', votes: 3 },
+      ],
+      allowMultiple: false,
+      anonymous: true,
+      showResultsBeforeEnd: true,
+      startsAt: '2026-09-22T00:00:00Z',
+      endsAt: '2026-10-05T23:59:59Z',
+      status: 'active',
+      createdAt: '2026-09-22T12:00:00Z',
+    },
+    {
+      id: 'POL-03',
+      authorId: 'usr-01',
+      authorName: 'Светлова Марина Ивановна',
+      title: 'Замена грязезащитного покрытия при входе в 1 подъезд',
+      description: 'Голосование жильцов 1 подъезда по выбору типа грязезащитного ковра в тамбуре.',
+      scopeType: 'entrance',
+      scopeId: '1',
+      pollType: 'single',
+      options: [
+        { id: 'opt-31', text: 'Ячеистое резиновое покрытие (легко мыть)', votes: 8 },
+        { id: 'opt-32', text: 'Ворсовый ковер на резиновой основе', votes: 11 },
+      ],
+      allowMultiple: false,
+      anonymous: false,
+      showResultsBeforeEnd: false,
+      startsAt: '2026-09-23T00:00:00Z',
+      endsAt: '2026-10-10T23:59:59Z',
+      status: 'active',
+      createdAt: '2026-09-23T14:00:00Z',
+    },
+  ] as Poll[],
+  pollVotes: {
+    'POL-01': ['opt-2'],
+  } as Record<string, string[]>,
 };

@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { X, HelpCircle, CheckCircle2, AlertCircle, Droplets, Zap, ArrowRight } from 'lucide-react';
+import {
+  X,
+  HelpCircle,
+  CheckCircle2,
+  AlertCircle,
+  Droplets,
+  Zap,
+  ArrowRight,
+  History,
+  TrendingUp,
+  Loader2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { MeterReading } from '../types';
 import { api } from '../lib/api';
@@ -17,7 +28,7 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
   meters,
   onMetersUpdated,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manual' | 'submit'>('submit');
+  const [activeTab, setActiveTab] = useState<'submit' | 'history' | 'manual'>('submit');
   const [inputValues, setInputValues] = useState<{ [id: string]: string }>(() => {
     const initial: { [id: string]: string } = {};
     meters.forEach((m) => {
@@ -39,24 +50,34 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
 
     try {
       for (const meter of meters) {
-        const val = parseFloat(inputValues[meter.id]);
-        if (!isNaN(val) && val > 0) {
-          if (val < meter.previousValue) {
-            toast.error(`Ошибка для "${meter.name}": показания не могут быть меньше предыдущих (${meter.previousValue})`);
-            setIsSubmitting(false);
-            return;
-          }
-          await api.submitMeter(meter.id, val);
+        const valStr = inputValues[meter.id];
+        if (!valStr || valStr.trim() === '') continue;
+
+        const val = parseFloat(valStr);
+        if (isNaN(val)) {
+          toast.error(`Введите корректное число для "${meter.name}"`);
+          setIsSubmitting(false);
+          return;
         }
+
+        if (val < meter.previousValue) {
+          toast.error(
+            `Ошибка для "${meter.name}": показания не могут быть меньше предыдущих (${meter.previousValue} ${meter.unit})`
+          );
+          setIsSubmitting(false);
+          return;
+        }
+
+        await api.submitMeter(meter.id, val);
       }
 
-      toast.success('Показания приборов учета успешно переданы', {
-        description: 'Расчет за текущий расчетный период обновлен в едином платежном документе.',
+      toast.success('Показания успешно переданы в УК', {
+        description: 'Новые данные зафиксированы в расчетном центре и сохранены в базе.',
       });
       onMetersUpdated();
       onClose();
-    } catch {
-      toast.error('Не удалось сохранить показания');
+    } catch (err: any) {
+      toast.error(err?.message || 'Не удалось сохранить показания');
     } finally {
       setIsSubmitting(false);
     }
@@ -72,8 +93,8 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
               <Droplets className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-white">Показания счетчиков</h2>
-              <p className="text-xs text-slate-400">Передача данных и руководство по списанию</p>
+              <h2 className="text-base font-semibold text-white">Приборы учета (Счетчики)</h2>
+              <p className="text-xs text-slate-400">Передача показаний и история расхода</p>
             </div>
           </div>
           <button
@@ -97,26 +118,128 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('history')}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1 transition-all cursor-pointer ${
+              activeTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>История</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('manual')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1 transition-all cursor-pointer ${
               activeTab === 'manual' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
             }`}
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span>Памятка / Как списывать</span>
+            <span>Памятка</span>
           </button>
         </div>
 
-        {activeTab === 'submit' ? (
+        {/* Tab 1: Submit readings */}
+        {activeTab === 'submit' && (
           <form onSubmit={handleSubmit} className="overflow-y-auto space-y-3">
             <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-[11px] text-indigo-200">
-              Показания принимаются с 15 по 25 число каждого месяца. Расчет формируется автоматически по утвержденным тарифам региона.
+              Показания принимаются с 15 по 25 число каждого месяца. Расчет формируется автоматически по утвержденным тарифам.
             </div>
 
+            {meters.map((meter) => {
+              const currentValNum = parseFloat(inputValues[meter.id] || '');
+              const isValidNumber = !isNaN(currentValNum);
+              const diff = isValidNumber ? currentValNum - meter.previousValue : null;
+              const isInvalidDiff = diff !== null && diff < 0;
+
+              return (
+                <div
+                  key={meter.id}
+                  className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {meter.type.includes('water') ? (
+                        <Droplets className="w-4 h-4 text-sky-400" />
+                      ) : (
+                        <Zap className="w-4 h-4 text-amber-400" />
+                      )}
+                      <span className="text-xs font-semibold text-white">{meter.name}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">№ {meter.serialNumber}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Предыдущее</span>
+                      <span className="text-xs font-semibold text-slate-300">
+                        {meter.previousValue} {meter.unit}
+                      </span>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-indigo-300 block mb-1">Новое значение</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder={String(meter.previousValue)}
+                        value={inputValues[meter.id] ?? ''}
+                        onChange={(e) => handleValueChange(meter.id, e.target.value)}
+                        className={`w-full px-2.5 py-1.5 rounded-lg bg-white/[0.05] border font-mono text-xs text-white focus:outline-none transition-colors ${
+                          isInvalidDiff
+                            ? 'border-rose-500 focus:border-rose-400'
+                            : 'border-white/20 focus:border-indigo-500'
+                        }`}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Real-time delta feedback */}
+                  {diff !== null && !isInvalidDiff && diff > 0 && (
+                    <div className="flex items-center gap-1 text-[11px] text-emerald-400 pt-1">
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span>Расход за период: +{diff.toFixed(2)} {meter.unit}</span>
+                    </div>
+                  )}
+
+                  {isInvalidDiff && (
+                    <div className="flex items-center gap-1 text-[11px] text-rose-400 pt-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Показание не может быть меньше {meter.previousValue}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Отправка данных...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Передать показания в УК</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Tab 2: History of readings */}
+        {activeTab === 'history' && (
+          <div className="overflow-y-auto space-y-3.5 text-xs text-slate-300">
             {meters.map((meter) => (
               <div
                 key={meter.id}
-                className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2"
+                className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2.5"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -125,46 +248,39 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
                     ) : (
                       <Zap className="w-4 h-4 text-amber-400" />
                     )}
-                    <span className="text-xs font-semibold text-white">{meter.name}</span>
+                    <span className="font-semibold text-white">{meter.name}</span>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono">№ {meter.serialNumber}</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Предыдущее</span>
-                    <span className="text-xs font-semibold text-slate-300">
-                      {meter.previousValue} {meter.unit}
-                    </span>
+                {meter.history && meter.history.length > 0 ? (
+                  <div className="divide-y divide-white/5 border border-white/5 rounded-xl overflow-hidden">
+                    {meter.history.map((entry, idx) => (
+                      <div key={idx} className="p-2 flex items-center justify-between bg-white/[0.01]">
+                        <span className="text-[11px] text-slate-400">{entry.date}</span>
+                        <div className="text-right">
+                          <span className="font-mono font-medium text-white text-xs">
+                            {entry.value} {meter.unit}
+                          </span>
+                          <span className="text-[10px] text-emerald-400 ml-2">
+                            (+{entry.consumption} {meter.unit})
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <label className="text-[10px] text-indigo-300 block mb-1">Текущее показание</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder={String(meter.previousValue)}
-                      value={inputValues[meter.id] || ''}
-                      onChange={(e) => handleValueChange(meter.id, e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-white/[0.05] border border-white/20 text-white font-mono text-xs focus:outline-none focus:border-indigo-500 transition-colors"
-                      required
-                    />
+                ) : (
+                  <div className="p-3 text-center text-slate-500 text-xs bg-white/[0.02] rounded-xl">
+                    История показаний пока пуста
                   </div>
-                </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
 
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{isSubmitting ? 'Отправка данных...' : 'Передать показания в УК'}</span>
-              </button>
-            </div>
-          </form>
-        ) : (
+        {/* Tab 3: Manual instructions */}
+        {activeTab === 'manual' && (
           <div className="overflow-y-auto space-y-3.5 text-xs text-slate-300">
             {/* Rule 1: Water meters */}
             <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
@@ -176,7 +292,7 @@ export const MeterManualModal: React.FC<MeterManualModalProps> = ({
                 На табло счетчика воды обычно 8 цифр: первые 5 черные, последние 3 красные.
               </p>
               <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-[11px] text-sky-200">
-                👉 <strong>Главное правило:</strong> Списываются только <strong>черные цифры до запятой</strong> (целые м³). Красные цифры (литры) округлять или передавать не нужно.
+                👉 <strong>Главное правило:</strong> Списываются только <strong>черные цифры до запятой</strong> (целые м³). Красные цифры округлять не нужно.
               </div>
             </div>
 

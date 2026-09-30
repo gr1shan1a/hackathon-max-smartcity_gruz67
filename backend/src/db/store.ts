@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS records(
 CREATE INDEX IF NOT EXISTS records_owner_collection ON records(owner_id, collection, position);
 INSERT INTO schema_migrations(version) VALUES (1) ON CONFLICT DO NOTHING;
 `;
-const privateKeys = new Set(['bills', 'meterReadings', 'parkingPasses', 'carReports', 'neighborMessages', 'ticketVotes', 'meetingVotes']);
-const singletonKeys = new Set(['complex', 'policeOfficer', 'garbageSchedule', 'ticketVotes', 'meetingVotes']);
+const privateKeys = new Set(['bills', 'meterReadings', 'parkingPasses', 'carReports', 'neighborMessages', 'ticketVotes', 'meetingVotes', 'pollVotes']);
+const singletonKeys = new Set(['complex', 'policeOfficer', 'garbageSchedule', 'ticketVotes', 'meetingVotes', 'pollVotes']);
 const routeKeys: Record<string, string[]> = {
   complex: ['complex'], profile: [], users: [], outages: ['outages'],
   tickets: ['tickets', 'ticketVotes'], bills: ['bills'], meters: ['meterReadings'],
@@ -39,7 +39,26 @@ const routeKeys: Record<string, string[]> = {
   neighbors: ['neighborMessages'], threads: ['threads'],
   directory: ['policeOfficer', 'staffDirectory', 'garbageSchedule'], marketplace: ['marketplace'],
   bot: ['tickets'],
+  polls: ['polls', 'pollVotes'],
+  announcements: ['announcements'],
 };
+
+export function isManager(profile: any): boolean {
+  return profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'chairman';
+}
+
+export function matchesUserScope(user: any, scopeType?: string, scopeId?: string | number): boolean {
+  if (!scopeType || scopeType === 'complex' || !scopeId || scopeId === 'all') {
+    return true;
+  }
+  if (scopeType === 'building') {
+    return String(scopeId) === String(user?.building || '2');
+  }
+  if (scopeType === 'entrance') {
+    return String(scopeId) === String(user?.entrance || '1');
+  }
+  return true;
+}
 
 export async function migrate() {
   const client = await pool.connect();
@@ -52,6 +71,57 @@ export async function migrate() {
   finally { client.release(); }
 }
 
+async function runMigration3(client: PoolClient) {
+  // Update mockUsers with building, notifications, and privacy if missing
+  for (const user of mockUsers) {
+    const existing = (await client.query('SELECT profile FROM users WHERE id=$1', [user.id])).rows[0]?.profile;
+    if (existing) {
+      const merged = { ...user, ...existing };
+      if (!merged.building) merged.building = user.building || 2;
+      if (!merged.notifications) merged.notifications = user.notifications;
+      if (!merged.privacy) merged.privacy = user.privacy;
+      await client.query('UPDATE users SET profile=$1 WHERE id=$2', [JSON.stringify(merged), user.id]);
+    }
+  }
+
+  // Seed announcements and polls if missing
+  for (const collection of ['announcements', 'polls']) {
+    const items = (initialData as any)[collection] || [];
+    for (const [pos, item] of items.entries()) {
+      await client.query(`
+        INSERT INTO records(collection, owner_id, id, position, payload)
+        VALUES($1, NULL, $2, $3, $4)
+        ON CONFLICT(collection, scope, id) DO NOTHING
+      `, [collection, item.id, pos, JSON.stringify(item)]);
+    }
+  }
+
+  // Seed pollVotes for users
+  for (const user of mockUsers) {
+    const votes = (initialData as any).pollVotes || {};
+    await client.query(`
+      INSERT INTO records(collection, owner_id, id, position, payload)
+      VALUES('pollVotes', $1, 'value', 0, $2)
+      ON CONFLICT(collection, scope, id) DO NOTHING
+    `, [user.id, JSON.stringify(votes)]);
+  }
+
+  // Ensure meterReadings have history
+  const meterRows = (await client.query("SELECT owner_id, id, payload FROM records WHERE collection='meterReadings'")).rows;
+  for (const row of meterRows) {
+    if (!row.payload.history || row.payload.history.length === 0) {
+      const seedItem = (initialData.meterReadings as any[]).find(m => m.id === row.id);
+      if (seedItem?.history) {
+        row.payload.history = seedItem.history;
+        await client.query("UPDATE records SET payload=$1 WHERE collection='meterReadings' AND scope=$2 AND id=$3",
+          [JSON.stringify(row.payload), row.owner_id || 'shared', row.id]);
+      }
+    }
+  }
+
+  await client.query('INSERT INTO schema_migrations(version) VALUES (3) ON CONFLICT DO NOTHING');
+}
+
 export async function seed() {
   const client = await pool.connect();
   try {
@@ -59,6 +129,9 @@ export async function seed() {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('smartcity:seed'))");
     // Once-only seed: restarting or reseeding never restores deleted demo records.
     if ((await client.query('SELECT 1 FROM schema_migrations WHERE version=2')).rowCount) {
+      if (!(await client.query('SELECT 1 FROM schema_migrations WHERE version=3')).rowCount) {
+        await runMigration3(client);
+      }
       await client.query('COMMIT'); return;
     }
     for (const user of mockUsers) {
@@ -79,6 +152,7 @@ export async function seed() {
       }
     }
     await client.query('INSERT INTO schema_migrations(version) VALUES (2)');
+    await runMigration3(client);
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
@@ -131,6 +205,7 @@ export function route(handler: (req: Request, res: Response, db: any) => unknown
       const rows = (await client.query(`SELECT collection, id, payload FROM records
         WHERE collection = ANY($1::text[]) AND (owner_id IS NULL OR owner_id=$2)
         ORDER BY position, id`, [collections, userId])).rows;
+      const initialProfileStr = JSON.stringify(profile);
       const db: any = { users, userProfile: profile, activeUserId: userId };
       for (const collection of collections) {
         const values = rows.filter(r => r.collection === collection).map(r => r.payload);
@@ -159,6 +234,9 @@ export function route(handler: (req: Request, res: Response, db: any) => unknown
       } as unknown as Response;
       await handler(req, reply, db);
       if (writing && res.statusCode < 400) {
+        if (JSON.stringify(db.userProfile) !== initialProfileStr) {
+          await client.query('UPDATE users SET profile = $1 WHERE id = $2', [JSON.stringify(db.userProfile), userId]);
+        }
         for (const collection of collections) {
           const owner = privateKeys.has(collection) ? userId : null;
           const previous = before.get(collection)!;

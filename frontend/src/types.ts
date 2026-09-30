@@ -1,22 +1,28 @@
 export interface Outage {
   id: string;
   title: string;
-  type: 'water' | 'electricity' | 'heating' | 'elevator';
-  status: 'active' | 'scheduled' | 'resolved';
-  period: string;
-  affected: string;
+  type?: 'water' | 'electricity' | 'heating' | 'elevator';
+  service?: string;
+  status: 'active' | 'scheduled' | 'resolved' | 'planned';
+  period?: string;
+  affected?: string;
   description: string;
-  updatedAt: string;
+  updatedAt?: string;
+  startDate?: string;
+  endDate?: string;
+  scopeType?: 'complex' | 'building' | 'entrance';
+  scopeId?: string;
 }
 
 export interface Ticket {
   id: string;
   title: string;
   category: 'elevator' | 'plumbing' | 'electric' | 'cleaning' | 'intercom' | 'parking' | 'other';
-  status: 'new' | 'assigned' | 'in_progress' | 'completed' | 'rejected';
+  status: 'new' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'cancelled';
   apartment: number;
   authorName: string;
   createdAt: string;
+  updatedAt?: string;
   description: string;
   upvotes: number;
   downvotes: number;
@@ -27,6 +33,8 @@ export interface Ticket {
     role: string;
     phone: string;
   };
+  masterName?: string;
+  masterComment?: string;
   completionPhoto?: string;
 }
 
@@ -48,6 +56,12 @@ export interface Bill {
   items: BillItem[];
 }
 
+export interface MeterHistoryEntry {
+  date: string;
+  value: number;
+  consumption: number;
+}
+
 export interface MeterReading {
   id: string;
   type: 'cold_water' | 'hot_water' | 'electricity_t1' | 'electricity_t2';
@@ -57,7 +71,9 @@ export interface MeterReading {
   currentValue?: number;
   unit: string;
   lastVerified: string;
+  lastSubmissionDate?: string;
   status: 'submitted' | 'due' | 'pending';
+  history?: MeterHistoryEntry[];
 }
 
 export interface ParkingPass {
@@ -74,7 +90,7 @@ export interface ParkingPass {
 export interface MeetingTimeSlot {
   id: string;
   datetime: string;
-  label: string;
+  label?: string;
   votes: number;
 }
 
@@ -82,15 +98,18 @@ export interface Meeting {
   id: string;
   title: string;
   type: 'oss' | 'informal';
-  initiator: string;
-  status: 'voting_time' | 'scheduled' | 'completed';
-  quorumReached: boolean;
-  quorumPercentage: number;
+  initiator?: string;
+  status: 'voting' | 'voting_time' | 'scheduled' | 'completed' | 'past';
+  date?: string;
+  format?: string;
+  quorum?: string;
+  quorumReached?: boolean;
+  quorumPercentage?: number;
   description: string;
   timeSlots: MeetingTimeSlot[];
   userVotedSlotId?: string;
   selectedDateTime?: string;
-  documents: { title: string; url: string }[];
+  documents?: { title: string; url: string }[];
 }
 
 export interface ThreadComment {
@@ -148,6 +167,49 @@ export interface MarketplaceItem {
   createdAt: string;
   description: string;
   image?: string;
+  status?: 'active' | 'sold';
+}
+
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: number;
+}
+
+export interface Poll {
+  id: string;
+  authorId: string;
+  authorName: string;
+  title: string;
+  description: string;
+  scopeType: 'complex' | 'building' | 'entrance';
+  scopeId: string;
+  pollType?: 'single' | 'multiple';
+  options: PollOption[];
+  allowMultiple: boolean;
+  anonymous: boolean;
+  showResultsBeforeEnd: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  status: 'draft' | 'active' | 'closed' | 'archived';
+  createdAt: string;
+  totalVotes?: number;
+  userVotedOptionIds?: string[];
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  text: string;
+  category: 'water' | 'elevator' | 'cleaning' | 'parking' | 'maintenance' | 'emergency' | 'general' | 'info';
+  scopeType: 'complex' | 'building' | 'entrance';
+  scopeId: string;
+  validUntil?: string;
+  isOfficial: boolean;
+  urgent?: boolean;
+  authorName: string;
+  authorRole?: string;
+  createdAt: string;
 }
 
 export interface UserProfile {
@@ -158,11 +220,26 @@ export interface UserProfile {
   apartment: number;
   entrance: number;
   floor: number;
-  accountNumber: string;
+  accountNumber?: string;
+  personalAccount?: string;
+  address?: string;
+  building?: number;
+  ownershipStatus?: string;
   registeredCars: string[];
   parkingSpot: string;
   hasCoveredParking: boolean;
-  role?: 'resident' | 'admin';
+  role?: 'resident' | 'admin' | 'manager' | 'chairman';
+  notifications?: {
+    outages?: boolean;
+    bills?: boolean;
+    polls?: boolean;
+    neighborMessages?: boolean;
+    parking?: boolean;
+  };
+  privacy?: {
+    hideApartment?: boolean;
+    hidePhone?: boolean;
+  };
 }
 
 export interface ComplexInfo {

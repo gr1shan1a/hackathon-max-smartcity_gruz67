@@ -130,3 +130,161 @@ test('parking passes support future dates, validation, owner-only cancellation a
   await stop(3101); await start(3101);
   assert.equal((await request('/parking')).data.passes.find(p => p.id === created.data.id).status, 'cancelled');
 });
+
+test('resident cannot invoke manager-only endpoints; manager can invoke them', async () => {
+  // Resident (usr-47) attempts manager endpoints -> 403
+  assert.equal((await request('/announcements', { method: 'POST', user: 'usr-47', body: { title: 'T', text: 'Txt' } })).status, 403);
+  assert.equal((await request('/polls', { method: 'POST', user: 'usr-47', body: { title: 'T', options: ['A', 'B'] } })).status, 403);
+  assert.equal((await request('/outages', { method: 'POST', user: 'usr-47', body: { title: 'T', service: 'water' } })).status, 403);
+  assert.equal((await request('/meetings', { method: 'POST', user: 'usr-47', body: { title: 'T', date: '2026-10-15' } })).status, 403);
+  assert.equal((await request('/tickets/TCK-139/status', { method: 'POST', user: 'usr-47', body: { status: 'in_progress' } })).status, 403);
+
+  // Manager (usr-01) can create announcement
+  const annRes = await request('/announcements', {
+    method: 'POST', user: 'usr-01',
+    body: { title: 'Опрессовка труб', text: 'Проверка отопления', scopeType: 'entrance', scopeId: '1', category: 'maintenance' }
+  });
+  assert.equal(annRes.status, 201);
+  assert.ok(annRes.data.id.startsWith('ANN-'));
+
+  // Manager can create poll
+  const pollRes = await request('/polls', {
+    method: 'POST', user: 'usr-01',
+    body: { title: 'Установка шлагбаума', description: 'Выбор подрядчика', scopeType: 'complex', scopeId: 'all', options: ['Подрядчик А', 'Подрядчик Б'] }
+  });
+  assert.equal(pollRes.status, 201);
+  assert.ok(pollRes.data.id.startsWith('POL-'));
+});
+
+test('territorial scope filters announcements and polls by entrance/building/complex', async () => {
+  // Create an announcement for entrance 1
+  await request('/announcements', {
+    method: 'POST', user: 'usr-01',
+    body: { title: 'Уборка подъезда 1', text: 'Только для 1 подъезда', scopeType: 'entrance', scopeId: '1' }
+  });
+
+  // Create an announcement for entrance 2
+  await request('/announcements', {
+    method: 'POST', user: 'usr-01',
+    body: { title: 'Лифт подъезда 2', text: 'Только для 2 подъезда', scopeType: 'entrance', scopeId: '2' }
+  });
+
+  // usr-47 is in entrance 2, usr-01 is in entrance 1
+  const dmitryAnn = (await request('/announcements', { user: 'usr-47' })).data;
+  const marinaAnn = (await request('/announcements', { user: 'usr-01' })).data;
+
+  assert.ok(dmitryAnn.some(a => a.title === 'Лифт подъезда 2'));
+  assert.ok(!dmitryAnn.some(a => a.title === 'Уборка подъезда 1'));
+
+  assert.ok(marinaAnn.some(a => a.title === 'Уборка подъезда 1'));
+  assert.ok(!marinaAnn.some(a => a.title === 'Лифт подъезда 2'));
+});
+
+test('poll voting, double-voting prevention, and results tracking', async () => {
+  const pollRes = await request('/polls', {
+    method: 'POST', user: 'usr-01',
+    body: { title: 'Тестовый опрос хакатона', options: ['Вариант 1', 'Вариант 2'], scopeType: 'complex', allowMultiple: false }
+  });
+  const pollId = pollRes.data.id;
+  const opt1Id = pollRes.data.options[0].id;
+
+  // Resident votes
+  const voteRes = await request(`/polls/${pollId}/vote`, {
+    method: 'POST', user: 'usr-47', body: { optionIds: [opt1Id] }
+  });
+  assert.equal(voteRes.status, 200);
+  assert.equal(voteRes.data.options[0].votes, 1);
+  assert.deepEqual(voteRes.data.userVotedOptionIds, [opt1Id]);
+
+  // Repeated vote should return 409 Conflict
+  const repeatVote = await request(`/polls/${pollId}/vote`, {
+    method: 'POST', user: 'usr-47', body: { optionIds: [opt1Id] }
+  });
+  assert.equal(repeatVote.status, 409);
+
+  // Poll list reflects the user vote
+  const list = (await request('/polls', { user: 'usr-47' })).data;
+  const pollInList = list.find(p => p.id === pollId);
+  assert.deepEqual(pollInList.userVotedOptionIds, [opt1Id]);
+  assert.equal(pollInList.options[0].votes, 1);
+});
+
+test('ticket lifecycle: resident edit/cancel when new, manager status transitions', async () => {
+  // Resident creates ticket
+  const createRes = await request('/tickets', {
+    method: 'POST', user: 'usr-47', body: { title: 'Не горит лампа', description: 'На 12 этаже' }
+  });
+  assert.equal(createRes.status, 201);
+  const ticketId = createRes.data.id;
+
+  // Resident edits their own ticket
+  const editRes = await request(`/tickets/${ticketId}`, {
+    method: 'PUT', user: 'usr-47', body: { title: 'Не горит лампа на 12 этаже', description: 'Мерцает и гаснет' }
+  });
+  assert.equal(editRes.status, 200);
+  assert.equal(editRes.data.title, 'Не горит лампа на 12 этаже');
+
+  // Other resident cannot edit
+  assert.equal((await request(`/tickets/${ticketId}`, { method: 'PUT', user: 'usr-01', body: { title: 'Взлом' } })).status, 403);
+
+  // Manager updates status to in_progress with master assignment
+  const statusRes = await request(`/tickets/${ticketId}/status`, {
+    method: 'POST', user: 'usr-01',
+    body: { status: 'in_progress', masterName: 'Электрик Смирнов И.В.', masterComment: 'Выехал на объект' }
+  });
+  assert.equal(statusRes.status, 200);
+  assert.equal(statusRes.data.status, 'in_progress');
+  assert.equal(statusRes.data.masterName, 'Электрик Смирнов И.В.');
+
+  // Resident cannot cancel once in_progress
+  assert.equal((await request(`/tickets/${ticketId}/cancel`, { method: 'POST', user: 'usr-47' })).status, 400);
+});
+
+test('profile settings can be updated while verified fields are immutable', async () => {
+  // Attempting to modify verified immutable fields fails
+  const badReq = await request('/profile', {
+    method: 'PUT', user: 'usr-47',
+    body: { name: 'Другой Человек' }
+  });
+  assert.equal(badReq.status, 400);
+
+  // Updating editable settings succeeds
+  const updateRes = await request('/profile', {
+    method: 'PUT', user: 'usr-47',
+    body: {
+      phone: '+7 999 555-44-33',
+      email: 'dmitry.kim@example.com',
+      registeredCars: ['М777ММ777'],
+      notifications: { outages: true, bills: false, polls: true },
+      privacy: { hidePhone: true }
+    }
+  });
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.data.phone, '+7 999 555-44-33');
+  assert.equal(updateRes.data.email, 'dmitry.kim@example.com');
+  assert.deepEqual(updateRes.data.registeredCars, ['М777ММ777']);
+  assert.equal(updateRes.data.notifications.bills, false);
+  assert.equal(updateRes.data.name, 'Ким Дмитрий Алексеевич'); // verified name unchanged
+
+  // Restart to verify persistence in PostgreSQL
+  await stop(3101); await start(3101);
+  const reloaded = (await request('/profile', { user: 'usr-47' })).data;
+  assert.equal(reloaded.phone, '+7 999 555-44-33');
+  assert.equal(reloaded.email, 'dmitry.kim@example.com');
+  assert.deepEqual(reloaded.registeredCars, ['М777ММ777']);
+});
+
+test('meter reading history persistence and double payment prevention', async () => {
+  // Meter history
+  const meterRes = await request('/meters', {
+    method: 'POST', user: 'usr-47', body: { meterId: 'mtr-1', value: 160 }
+  });
+  assert.equal(meterRes.status, 200);
+  assert.ok(meterRes.data.meter.history.length > 0);
+  assert.equal(meterRes.data.meter.currentValue, 160);
+
+  // Bill payment double-pay check (BILL-2026-08 is already paid)
+  const payAlreadyPaid = await request('/bills/BILL-2026-08/pay', { method: 'POST', user: 'usr-47' });
+  assert.equal(payAlreadyPaid.status, 400);
+});
+

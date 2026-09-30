@@ -30,7 +30,7 @@ npm -v    # Ожидается: 10.x.x или выше
 ### 1. Клонировать репозиторий
 
 ```bash
-git clone <URL_РЕПОЗИТОРИЯ>
+git clone https://github.com/gr1shan1a/hackathon-max-smartcity_gruz67
 cd hackathon-max-smartcity_gruz67
 ```
 

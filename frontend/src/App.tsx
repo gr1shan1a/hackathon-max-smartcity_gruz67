@@ -36,6 +36,8 @@ import {
   PoliceOfficer,
   MarketplaceItem,
   ParkingPass,
+  Announcement,
+  Poll,
 } from './types';
 import { ArrowLeft, X, MoreVertical } from 'lucide-react';
 
@@ -68,6 +70,8 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
   const [meters, setMeters] = useState<MeterReading[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [threads, setThreads] = useState<ThreadPost[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [staff, setStaff] = useState<StaffContact[]>([]);
   const [policeOfficer, setPoliceOfficer] = useState<PoliceOfficer>({
     name: 'Семенов Артём Викторович',
@@ -99,7 +103,7 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
   useEffect(() => {
     async function loadData() {
       try {
-        const [c, p, o, t, b, m, mt, th, dir, mk, parking] = await Promise.all([
+        const [c, p, o, t, b, m, mt, th, dir, mk, parking, anns, pls] = await Promise.all([
           api.getComplex(),
           api.getProfile(),
           api.getOutages(),
@@ -111,6 +115,8 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
           api.getDirectory(),
           api.getMarketplace(),
           api.getParking(),
+          api.getAnnouncements(),
+          api.getPolls(),
         ]);
         setComplex(c);
         setProfile(p);
@@ -125,6 +131,8 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
         if (dir.garbage) setGarbage(dir.garbage);
         setMarketplace(mk);
         setPasses(parking.passes);
+        setAnnouncements(anns);
+        setPolls(pls);
       } catch (err) {
         setLoadError('Не удалось загрузить данные. Проверьте соединение с сервером.');
       } finally {
@@ -213,10 +221,21 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
         {currentTab === 'services' && <ServicesView group={serviceGroup} onGroup={setServiceGroup} onAction={onAction}/>}
         {currentTab === 'parking' && <ParkingView profile={profile} passes={passes} onCreate={()=>onAction('guest-pass')} onOpen={openPass}/>}
         {currentTab === 'dashboard' && (
-          <Dashboard profile={profile} outages={outages} tickets={tickets} bills={bills} passes={passes}
-            onAction={onAction} onPass={openPass}
-            onGroup={group=>{setServiceGroup(group);navigate('services');}}/>
-
+          <Dashboard
+            profile={profile}
+            outages={outages}
+            tickets={tickets}
+            bills={bills}
+            passes={passes}
+            announcements={announcements}
+            polls={polls}
+            onAction={onAction}
+            onPass={openPass}
+            onGroup={group => {
+              setServiceGroup(group);
+              navigate('services');
+            }}
+          />
         )}
 
         {currentTab === 'tickets' && (
@@ -239,7 +258,11 @@ function AppContent({ onIdentityChanged }: { onIdentityChanged: () => void }) {
         )}
 
         {currentTab === 'meetings' && (
-          <MeetingsView meetings={meetings} onMeetingsUpdated={setMeetings} />
+          <MeetingsView
+            meetings={meetings}
+            onMeetingsUpdated={setMeetings}
+            userProfile={profile}
+          />
         )}
 
         {currentTab === 'community' && (
