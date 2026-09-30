@@ -1,0 +1,109 @@
+version: "1.0"
+team_id: "Груз 67"
+solution_name: "MAX Дом — Умный город"
+base_url: "http://localhost:3001/api"
+
+checks:
+  - id: "check_health"
+    description: "Проверка работоспособности бэкенда"
+    method: "GET"
+    path: "/health"
+    role: "resident"
+    expected_status: [200]
+    expected_content_type: "application/json"
+    required_response_fields:
+      - "status"
+      - "service"
+
+  - id: "check_tickets_list"
+    description: "Получение списка заявок дома"
+    method: "GET"
+    path: "/tickets"
+    role: "resident"
+    expected_status: [200]
+    expected_content_type: "application/json"
+
+  - id: "check_create_ticket"
+    description: "Создание заявки в управляющую компанию"
+    method: "POST"
+    path: "/tickets"
+    role: "resident"
+    headers:
+      Content-Type: "application/json"
+    body:
+      title: "Тестовая проверка: не горит свет на площадке"
+      description: "Лестничный марш 5 этаж"
+      category: "electric"
+      isPublic: true
+    expected_status: [201]
+    expected_content_type: "application/json"
+    required_response_fields:
+      - "id"
+      - "title"
+      - "status"
+
+  - id: "check_bills"
+    description: "Получение начислений ЖКУ"
+    method: "GET"
+    path: "/bills"
+    role: "resident"
+    expected_status: [200]
+    expected_content_type: "application/json"
+
+  - id: "check_meetings"
+    description: "Получение общедомовых собраний и слотов голосования"
+    method: "GET"
+    path: "/meetings"
+    role: "resident"
+    expected_status: [200]
+    expected_content_type: "application/json"
+
+  - id: "check_report_car"
+    description: "Отправка оповещения владельцу мешающего автомобиля"
+    method: "POST"
+    path: "/parking/report-car"
+    role: "resident"
+    headers:
+      Content-Type: "application/json"
+    body:
+      carNumber: "М123АВ799"
+      issueType: "blocked_exit"
+      location: "Выездные ворота №1"
+      description: "Перекрыл пожарный проезд"
+    expected_status: [201]
+    expected_content_type: "application/json"
+    required_response_fields:
+      - "success"
+      - "message"
+
+  - id: "check_neighbor_message"
+    description: "Отправка приватного сообщения в квартиру жильца"
+    method: "POST"
+    path: "/neighbors/message"
+    role: "resident"
+    headers:
+      Content-Type: "application/json"
+    body:
+      toApartment: 48
+      topic: "Протечка"
+      text: "Здравствуйте! Перекройте, пожалуйста, стояк"
+    expected_status: [201]
+    expected_content_type: "application/json"
+    required_response_fields:
+      - "success"
+      - "data"
+
+  - id: "check_bot_webhook"
+    description: "Обработка команды бота МАХ /start"
+    method: "POST"
+    path: "/bot/webhook"
+    role: "resident"
+    headers:
+      Content-Type: "application/json"
+    body:
+      command: "/start"
+    expected_status: [200]
+    expected_content_type: "application/json"
+    required_response_fields:
+      - "text"
+      - "buttons"

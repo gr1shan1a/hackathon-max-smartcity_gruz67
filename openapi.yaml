@@ -1,0 +1,698 @@
+openapi: 3.1.0
+info:
+  title: MAX Smart City API (MAX Дом)
+  description: REST API цифровой платформы управления многоквартирным домом в мессенджере MAX
+  version: 1.1.0
+  contact:
+    name: Команда «Груз 67»
+servers:
+  - url: http://localhost:3001/api
+    description: Локальный сервер разработки
+  - url: http://localhost/api
+    description: Docker Nginx Reverse Proxy
+
+paths:
+  /health:
+    get:
+      summary: Проверка статуса сервиса
+      responses:
+        '200':
+          description: Сервис работает штатно
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: MAX Smart City API
+                  version:
+                    type: string
+                    example: 1.1.0
+
+  /profile:
+    get:
+      summary: Получение профиля текущего жителя (с разделением на подтвержденные и редактируемые данные)
+      responses:
+        '200':
+          description: Профиль жильца
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+    put:
+      summary: Редактирование пользовательских настроек (телефон, email, авто, уведомления, приватность)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                email:
+                  type: string
+                registeredCars:
+                  type: array
+                  items:
+                    type: string
+                notifications:
+                  type: object
+                privacy:
+                  type: object
+      responses:
+        '200':
+          description: Обновленный профиль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Попытка изменения подтвержденных паспортных полей
+
+  /complex:
+    get:
+      summary: Информация о жилом комплексе и управляющей компании
+      responses:
+        '200':
+          description: Данные МКД
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplexInfo'
+
+  /announcements:
+    get:
+      summary: Список официальных объявлений с фильтрацией по территориальному scope (подъезд / дом / ЖК)
+      responses:
+        '200':
+          description: Список объявлений
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Announcement'
+    post:
+      summary: Создание официального объявления управляющим (scope: entrance/building/complex)
+      responses:
+        '201':
+          description: Объявление создано
+        '403':
+          description: Доступ запрещен (только управляющий)
+
+  /announcements/{id}:
+    put:
+      summary: Редактирование объявления управляющим
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Объявление обновлено
+        '403':
+          description: Доступ запрещен
+    delete:
+      summary: Удаление объявления управляющим
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Объявление удалено
+        '403':
+          description: Доступ запрещен
+
+  /polls:
+    get:
+      summary: Список опросов для жильцов (фильтрация по территории)
+      responses:
+        '200':
+          description: Список опросов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Poll'
+    post:
+      summary: Создание опроса управляющим
+      responses:
+        '201':
+          description: Опрос создан
+        '403':
+          description: Доступ запрещен
+
+  /polls/{id}/vote:
+    post:
+      summary: Голосование жильца в опросе (с защитой от повторного голосования)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                optionId:
+                  type: string
+                optionIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Голос учтен
+        '403':
+          description: Опрос не относится к территории жильца или завершен
+        '409':
+          description: Вы уже проголосовали в этом опросе
+
+  /polls/{id}/close:
+    post:
+      summary: Завершение опроса управляющим
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Опрос завершен
+        '403':
+          description: Доступ запрещен
+
+  /polls/{id}:
+    delete:
+      summary: Удаление опроса управляющим
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Опрос удален
+        '403':
+          description: Доступ запрещен
+
+  /outages:
+    get:
+      summary: Список актуальных аварий и плановых отключений
+      responses:
+        '200':
+          description: Аварии и отключения
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Outage'
+    post:
+      summary: Публикация аварийного оповещения (управляющий)
+      responses:
+        '201':
+          description: Оповещение создано
+        '403':
+          description: Доступ запрещен
+
+  /outages/{id}:
+    put:
+      summary: Обновление информации об аварии (управляющий)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Информация обновлена
+    delete:
+      summary: Удаление оповещения об аварии (управляющий)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Оповещение удалено
+
+  /tickets:
+    get:
+      summary: Список обращений и заявок по дому
+      responses:
+        '200':
+          description: Заявки
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Ticket'
+    post:
+      summary: Создание новой заявки в управляющую компанию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description]
+              properties:
+                title:
+                  type: string
+                  example: Застрял пассажирский лифт
+                description:
+                  type: string
+                  example: Подъезд 2, этаж 3.
+                category:
+                  type: string
+                  example: elevator
+                isPublic:
+                  type: boolean
+                  example: true
+      responses:
+        '201':
+          description: Заявка успешно зарегистрирована
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+
+  /tickets/{id}:
+    put:
+      summary: Редактирование своей заявки заявителем (только пока статус 'new')
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заявка обновлена
+        '403':
+          description: Заявка не принадлежит пользователю или уже взята в работу
+
+  /tickets/{id}/cancel:
+    post:
+      summary: Отзыв заявки заявителем до начала выполнения
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заявка отозвана
+
+  /tickets/{id}/status:
+    post:
+      summary: Смена статуса заявки и назначение мастера (только управляющий)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [new, assigned, in_progress, completed, rejected]
+                masterName:
+                  type: string
+                masterComment:
+                  type: string
+      responses:
+        '200':
+          description: Статус заявки обновлен
+        '403':
+          description: Доступ запрещен (только управляющий)
+
+  /tickets/{id}/vote:
+    post:
+      summary: Подтверждение (upvote) или опровержение актуальности проблемы
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Голос учтен
+
+  /bills:
+    get:
+      summary: Счета за ЖКУ и история начислений
+      responses:
+        '200':
+          description: Счета жителя
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bill'
+
+  /bills/{id}/pay:
+    post:
+      summary: Оплата квитанции через СБП (demo-режим с сохранением статуса и защитой от повторной оплаты)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Счет успешно оплачен
+        '400':
+          description: Счет уже оплачен
+
+  /meters:
+    get:
+      summary: Список приборов учета квартиры с историей списаний
+      responses:
+        '200':
+          description: Счетчики и история
+    post:
+      summary: Передача текущих показаний счетчиков (с валидацией против уменьшения)
+      responses:
+        '200':
+          description: Показания приняты и зафиксированы
+        '400':
+          description: Новые показания меньше предыдущих
+
+  /meetings:
+    get:
+      summary: Список ОСС (собраний собственников)
+      responses:
+        '200':
+          description: Собрания
+    post:
+      summary: Назначение нового ОСС (только управляющий)
+      responses:
+        '201':
+          description: Собрание создано
+        '403':
+          description: Доступ запрещен
+
+  /meetings/{id}/vote-slot:
+    post:
+      summary: Голосование за удобный временной слот проведения ОСС
+      responses:
+        '200':
+          description: Голос за слот принят
+        '400':
+          description: Голосование завершено
+
+  /marketplace:
+    get:
+      summary: Доска объявлений дома (барахолка и услуги)
+      responses:
+        '200':
+          description: Объявления
+    post:
+      summary: Размещение объявления жильцом
+      responses:
+        '201':
+          description: Объявление создано
+
+  /marketplace/{id}:
+    put:
+      summary: Редактирование объявления или смена статуса на "продано" (только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Объявление обновлено
+        '403':
+          description: Доступ запрещен (не автор)
+    delete:
+      summary: Удаление объявления (только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Объявление удалено
+        '403':
+          description: Доступ запрещен (не автор)
+
+  /parking:
+    get:
+      summary: Парковка и пропуска
+      responses:
+        '200':
+          description: Данные о парковке
+
+  /parking/passes:
+    post:
+      summary: Оформление гостевого пропуска
+      responses:
+        '201':
+          description: Пропуск оформлен
+
+  /parking/report-car:
+    post:
+      summary: Жалоба на неправильно припаркованный автомобиль
+      responses:
+        '200':
+          description: Жалоба зарегистрирована
+
+  /neighbors/message:
+    post:
+      summary: Отправка защищенного сообщения соседу по номеру квартиры
+      responses:
+        '201':
+          description: Сообщение доставлено
+
+  /directory:
+    get:
+      summary: Телефонный справочник, контакты участкового и график вывоза мусора
+      responses:
+        '200':
+          description: Контакты и графики
+
+  /bot/webhook:
+    post:
+      summary: Обработка команд чат-бота MAX (/start, /tickets, /bills, /report)
+      responses:
+        '200':
+          description: Ответ бота
+
+components:
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        apartment:
+          type: integer
+        entrance:
+          type: integer
+        floor:
+          type: integer
+        accountNumber:
+          type: string
+        personalAccount:
+          type: string
+        ownershipStatus:
+          type: string
+        role:
+          type: string
+          enum: [resident, manager]
+        registeredCars:
+          type: array
+          items:
+            type: string
+        parkingSpot:
+          type: string
+        hasCoveredParking:
+          type: boolean
+        notifications:
+          type: object
+        privacy:
+          type: object
+
+    ComplexInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        managementCompany:
+          type: string
+        apartmentsCount:
+          type: integer
+
+    Announcement:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        text:
+          type: string
+        category:
+          type: string
+        scopeType:
+          type: string
+          enum: [complex, building, entrance]
+        scopeId:
+          type: string
+        isOfficial:
+          type: boolean
+        urgent:
+          type: boolean
+        authorName:
+          type: string
+        createdAt:
+          type: string
+
+    Poll:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        scopeType:
+          type: string
+          enum: [complex, building, entrance]
+        scopeId:
+          type: string
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              text:
+                type: string
+              votesCount:
+                type: integer
+        allowMultiple:
+          type: boolean
+        status:
+          type: string
+          enum: [draft, scheduled, active, closed, archived]
+        totalVotes:
+          type: integer
+        createdAt:
+          type: string
+
+    Outage:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        period:
+          type: string
+        affected:
+          type: string
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [new, assigned, in_progress, completed, rejected]
+        category:
+          type: string
+        apartment:
+          type: integer
+        authorName:
+          type: string
+        upvotes:
+          type: integer
+        downvotes:
+          type: integer
+        masterComment:
+          type: string
+        assignedTo:
+          type: object
+          properties:
+            name:
+              type: string
+            phone:
+              type: string
+            role:
+              type: string
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: string
+        period:
+          type: string
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        status:
+          type: string
+          enum: [pending, paid]
+        dueDate:
+          type: string
